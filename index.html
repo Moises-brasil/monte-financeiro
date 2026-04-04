@@ -110,8 +110,11 @@ body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--t
 .meta-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .meta-header h3 { font-size: 14px; font-weight: 600; }
 .meta-header span { font-size: 14px; font-weight: 700; color: var(--primary); }
-.meta-bar-bg { height: 16px; background: var(--bg); border-radius: 8px; overflow: hidden; }
-.meta-bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary), #34d399); border-radius: 8px; transition: width 0.8s ease; }
+.meta-bar-bg { height: 20px; background: var(--bg); border-radius: 10px; overflow: hidden; position: relative; }
+.meta-bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary), #34d399); border-radius: 10px; transition: width 0.8s ease; position: absolute; top: 0; left: 0; z-index: 2; }
+.meta-bar-target { height: 100%; background: rgba(251,191,36,0.18); border-radius: 10px; position: absolute; top: 0; left: 0; z-index: 1; }
+.meta-target-marker { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--yellow); z-index: 3; }
+.meta-target-label { position: absolute; top: -18px; font-size: 10px; color: var(--yellow); white-space: nowrap; transform: translateX(-50%); z-index: 3; }
 .meta-labels { display: flex; justify-content: space-between; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
 
 /* CHARTS */
@@ -235,6 +238,10 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           <div class="meta-bar-bg"><div class="meta-bar-fill" id="meta-bar" style="width:0%"></div></div>
           <div class="meta-labels"><span>R$ 0</span><span id="meta-mrr-label">MRR: R$ 0</span><span>R$ 100.000</span></div>
         </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <label style="color:var(--text-muted);font-size:13px;">Período:</label>
+          <select id="visao-mes" onchange="updateVisaoMes()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:13px;"></select>
+        </div>
         <div class="kpi-grid" id="kpi-grid"></div>
         <div class="chart-grid">
           <div class="chart-card"><h3>Receita vs Despesas (6 meses)</h3><canvas id="chart-receita-despesa"></canvas></div>
@@ -291,15 +298,16 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 
     <!-- PROJEÇÃO -->
     <div class="tab-content" id="tab-projecao">
+      <div class="kpi-grid" id="projecao-kpi-grid" style="margin-bottom:24px;"></div>
       <div class="chart-card" style="margin-bottom:24px;">
-        <h3>Projeção de Receita (próximos 6 meses)</h3>
+        <h3>Projetado vs Meta Mensal</h3>
         <canvas id="chart-projecao"></canvas>
       </div>
       <div class="table-section">
-        <div class="table-header"><h3>Detalhamento da Projeção</h3></div>
+        <div class="table-header"><h3>Detalhamento — Valores Concretos (Assinaturas Ativas + Parcelas Programadas)</h3></div>
         <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Período</th><th>Recorrente</th><th>Parcelas</th><th>Pontual Est.</th><th>Total Projetado</th></tr></thead>
+            <thead><tr><th>Período</th><th>Recorrente</th><th>Parcelas</th><th>Total Projetado</th><th>Meta do Mês</th><th>Gap</th></tr></thead>
             <tbody id="projecao-tbody"></tbody>
           </table>
         </div>
@@ -337,6 +345,10 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     </div>
     <!-- DESPESAS FIXAS -->
     <div class="tab-content" id="tab-despesas">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <label style="color:var(--text-muted);font-size:13px;">Período:</label>
+        <select id="despesas-mes" onchange="filterDespesasMes()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:13px;"></select>
+      </div>
       <div class="kpi-grid" id="despesas-kpi-grid" style="margin-bottom:24px;"></div>
 
       <div class="table-section" style="margin-bottom:24px;">
@@ -410,7 +422,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 <script>
 const SUPABASE_URL = 'https://ebomktfbxmnhgrgnkmul.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_mxM1C2VHYsnShz_CnlsG8g_HyHPlvxP';
-const PASS_HASH = 'a94c1de9b09d653d626c7c73df49cb40a29d775539ac83d5b8df4f17beef6cb7';
+const PASS_HASH = 'f017348607c1ef7fd1f9eb5204ae00f4d5ce2918379c6f3e0bee1b39f572df36';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // AUTH
@@ -462,6 +474,8 @@ const CHART_OPTS = {
 
 let allClientes = [];
 let resumo = {};
+let allDRE = [];
+let allExpenses = [];
 
 async function loadAll() {
   try {
@@ -481,11 +495,12 @@ async function loadAll() {
     allClientes = resC.data || [];
     const subs = resS.data || [];
     const dre = resD.data || [];
+    allDRE = dre; // Store for month selector
     const proj = resP.data || [];
     const alertas = resA.data || [];
     const balances = resBal.data || [];
     const expenses = resExp.data || [];
-    const allExpenses = resAllExp.data || [];
+    allExpenses = resAllExp.data || []; // Store for despesas filter
     const transfers = resTrans.data || [];
 
     renderKPIs(resumo);
@@ -494,11 +509,13 @@ async function loadAll() {
     renderSubs(subs);
     renderDRE(dre);
     renderProjecao(proj);
-    renderAlertas(alertas);
+    renderAlertas(alertas, subs);
     renderCaixa(balances, resumo);
     renderDespesasCat(expenses);
     renderCharts(dre, proj);
     renderDespesasFixas(allExpenses, transfers);
+    populateVisaoMesSelector();
+    populateDespesasMesSelector();
 
     document.getElementById('last-sync').textContent = 'Atualizado: ' + new Date().toLocaleString('pt-BR');
     document.getElementById('loading-main').style.display = 'none';
@@ -509,14 +526,20 @@ async function loadAll() {
   }
 }
 
-function renderKPIs(r) {
+function renderKPIs(r, dreMonth) {
+  // Custo fixo total real: PJ R$13.380 + pró-labore R$10.000 + ferramentas ~R$1.600 + marketing R$2.000
+  const CUSTO_FIXO_TOTAL = 26980;
+  const receitaMes = Number(r.receita_recebida_mes || 0);
+  const lucroLiqReal = receitaMes - CUSTO_FIXO_TOTAL;
+  const margemLiqReal = receitaMes > 0 ? ((lucroLiqReal / receitaMes) * 100).toFixed(1) : '0.0';
+
   const kpis = [
     { label: 'MRR Atual', value: R$(r.mrr_atual), color: 'green', sub: r.total_assinaturas_ativas + ' assinaturas ativas' },
-    { label: 'Recebido no Mês', value: R$(r.receita_recebida_mes), color: 'green', sub: 'Receita líquida confirmada' },
+    { label: 'Recebido no Mês', value: R$(receitaMes), color: 'green', sub: 'Receita líquida confirmada' },
     { label: 'Pendente no Mês', value: R$(r.receita_pendente_mes), color: 'orange', sub: 'Aguardando pagamento' },
-    { label: 'Despesas no Mês', value: R$(r.despesas_mes), color: 'red', sub: 'Incluindo pró-labore' },
-    { label: 'Lucro Operacional', value: R$(r.lucro_bruto_mes), color: r.lucro_bruto_mes >= 0 ? 'green' : 'red', sub: 'Receita - despesas (s/ pró-labore)' },
-    { label: 'Lucro Líquido', value: R$(r.lucro_liquido_mes), color: r.lucro_liquido_mes >= 0 ? 'green' : 'red', sub: 'Receita - todas despesas' },
+    { label: 'Custo Fixo Mensal', value: R$(CUSTO_FIXO_TOTAL), color: 'red', sub: 'Pessoas + ferramentas + marketing' },
+    { label: 'Lucro Líquido', value: R$(lucroLiqReal), color: lucroLiqReal >= 0 ? 'green' : 'red', sub: 'Receita − todos custos fixos' },
+    { label: 'Margem Líquida', value: margemLiqReal + '%', color: lucroLiqReal >= 0 ? 'green' : 'red', sub: 'Lucro / Receita' },
     { label: 'Inadimplência', value: R$(r.total_inadimplente), color: r.total_inadimplente > 0 ? 'red' : 'green', sub: r.clientes_inadimplentes + ' clientes em atraso' },
     { label: 'Caixa Total', value: R$(r.caixa_total), color: 'blue', sub: 'Asaas + Inter + Mercado Pago' },
   ];
@@ -529,10 +552,97 @@ function renderKPIs(r) {
 }
 
 function renderMeta(r) {
-  const pctVal = Math.min(Number(r.percentual_meta_100k || 0), 100);
-  document.getElementById('meta-pct').textContent = pctVal + '%';
+  const mrr = Number(r.mrr_atual || 0);
+  const META_FINAL = 100000;
+  const pctVal = Math.min((mrr / META_FINAL) * 100, 100);
+  document.getElementById('meta-pct').textContent = pctVal.toFixed(1) + '%';
   document.getElementById('meta-bar').style.width = pctVal + '%';
-  document.getElementById('meta-mrr-label').textContent = 'MRR: ' + R$(r.mrr_atual);
+  document.getElementById('meta-mrr-label').textContent = 'MRR: ' + R$(mrr);
+
+  // Meta intermediária do mês (progressão linear Abr→Jul)
+  // Abr=MRR base, Mai, Jun, Jul=100k
+  const metas = { '2026-04': 40000, '2026-05': 60000, '2026-06': 80000, '2026-07': 100000 };
+  const mesAtual = new Date().toISOString().slice(0, 7);
+  const metaMes = metas[mesAtual] || META_FINAL;
+  const pctMeta = (metaMes / META_FINAL) * 100;
+
+  // Renderizar marcador da meta do mês na barra
+  const barBg = document.querySelector('.meta-bar-bg');
+  // Remover marcadores anteriores
+  barBg.querySelectorAll('.meta-target-marker, .meta-target-label').forEach(el => el.remove());
+  if (metaMes < META_FINAL) {
+    const marker = document.createElement('div');
+    marker.className = 'meta-target-marker';
+    marker.style.left = pctMeta + '%';
+    barBg.appendChild(marker);
+    const label = document.createElement('div');
+    label.className = 'meta-target-label';
+    label.style.left = pctMeta + '%';
+    label.textContent = 'Meta ' + mesAtual.slice(5) + '/' + mesAtual.slice(2,4) + ': ' + R$(metaMes);
+    barBg.appendChild(label);
+  }
+}
+
+function populateVisaoMesSelector() {
+  const select = document.getElementById('visao-mes');
+  if (!select || !allDRE.length) return;
+  select.innerHTML = '';
+  const today = new Date();
+  const currentMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+
+  allDRE.slice(0, 6).reverse().forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.periodo;
+    opt.textContent = m.periodo;
+    if (m.periodo === currentMonth) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function updateVisaoMes() {
+  const selected = document.getElementById('visao-mes').value;
+  const dreMonth = allDRE.find(m => m.periodo === selected);
+  if (dreMonth) {
+    renderKPIs(resumo, dreMonth);
+  }
+}
+
+function populateDespesasMesSelector() {
+  const select = document.getElementById('despesas-mes');
+  if (!select || !allExpenses.length) return;
+
+  // Get unique months from expenses, sorted
+  const months = new Set();
+  allExpenses.forEach(e => {
+    if (e.date) {
+      const month = e.date.substring(0, 7); // YYYY-MM
+      months.add(month);
+    }
+  });
+
+  const sortedMonths = Array.from(months).sort().reverse();
+  select.innerHTML = '';
+  const today = new Date();
+  const currentMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+
+  sortedMonths.forEach(month => {
+    const opt = document.createElement('option');
+    opt.value = month;
+    opt.textContent = month;
+    if (month === currentMonth) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function filterDespesasMes() {
+  const selected = document.getElementById('despesas-mes').value;
+  const filtered = allExpenses.filter(e => e.date && e.date.substring(0, 7) === selected);
+
+  const sorted = [...filtered].sort((a,b) => b.date?.localeCompare(a.date));
+  const tbody = document.getElementById('all-expenses-tbody');
+  tbody.innerHTML = sorted.length > 0 ? sorted.map(e =>
+    `<tr><td>${fmtDate(e.date)}</td><td>${e.description}</td><td>${e.expense_categories?.name || '—'}</td><td>${R$(e.amount)}</td><td><span class="badge badge-gray">${e.source || 'manual'}</span></td></tr>`
+  ).join('') : '<tr><td colspan="5" style="color:var(--text-dim)">Nenhuma despesa neste período</td></tr>';
 }
 
 function renderClientes(clientes, filter) {
@@ -572,21 +682,49 @@ function renderSubs(subs) {
   }).join('');
 }
 
-function renderAlertas(alertas) {
-  if (!alertas.length) {
+function renderAlertas(alertas, subs) {
+  const items = [];
+  const today = new Date();
+
+  // Generate alerts from subscriptions
+  (subs || []).forEach(s => {
+    const nextDue = s.next_due_date ? new Date(s.next_due_date) : null;
+    const clientName = s.clients?.name || '—';
+
+    if (s.status === 'EXPIRED') {
+      items.push({ type: 'EXPIRADA', client: clientName, desc: s.description, value: s.value, date: s.next_due_date, severity: 'critical' });
+    } else if (s.status === 'ACTIVE' && nextDue) {
+      const daysUntil = Math.ceil((nextDue - today) / (1000*60*60*24));
+      if (daysUntil < 0) {
+        items.push({ type: 'ATRASO ' + Math.abs(daysUntil) + 'd', client: clientName, desc: s.description, value: s.value, date: s.next_due_date, severity: 'warning' });
+      } else if (daysUntil <= 7) {
+        items.push({ type: 'VENCE EM ' + daysUntil + 'd', client: clientName, desc: s.description, value: s.value, date: s.next_due_date, severity: 'info' });
+      }
+    }
+  });
+
+  // Also use server-side alerts if they have real data
+  (alertas || []).forEach(a => {
+    if (a.client_name && a.value > 0) {
+      items.push({ type: a.alert_type || 'ALERTA', client: a.client_name, desc: a.description, value: a.value, date: a.next_due_date, severity: a.alert_type === 'EXPIRADA' ? 'critical' : 'warning' });
+    }
+  });
+
+  if (!items.length) {
     document.getElementById('alertas-list').innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:12px;">Nenhum alerta no momento.</div>';
     return;
   }
-  document.getElementById('alertas-list').innerHTML = alertas.map(a => {
-    let cls = 'info', bcls = 'info';
-    if (a.alert_type === 'EXPIRADA' || a.alert_type === 'INATIVA') { cls = 'critical'; bcls = 'critical'; }
-    else if (a.alert_type && a.alert_type.includes('ATRASO')) { cls = 'warning'; bcls = 'warning'; }
-    return `<div class="alert-item ${cls}">
-      <span class="alert-badge ${bcls}">${a.alert_type || 'ALERTA'}</span>
-      <span class="alert-text"><strong>${a.client_name || '—'}</strong> — ${a.description || ''} ${R$(a.value)}</span>
-      <span class="alert-detail">${a.days_overdue ? a.days_overdue+'d atraso' : ''} ${a.next_due_date ? 'Venc: '+fmtDate(a.next_due_date) : ''}</span>
-    </div>`;
-  }).join('');
+
+  // Sort: critical first, then warning, then info
+  const order = { critical: 0, warning: 1, info: 2 };
+  items.sort((a, b) => (order[a.severity] || 9) - (order[b.severity] || 9));
+
+  document.getElementById('alertas-list').innerHTML = items.map(a => `
+    <div class="alert-item ${a.severity}">
+      <span class="alert-badge ${a.severity}">${a.type}</span>
+      <span class="alert-text"><strong>${a.client}</strong> — ${a.desc || ''} ${R$(a.value)}</span>
+      <span class="alert-detail">${a.date ? 'Venc: ' + fmtDate(a.date) : ''}</span>
+    </div>`).join('');
 }
 
 function renderDRE(dre) {
@@ -607,7 +745,7 @@ function renderDRE(dre) {
     row('  Pontual','receita_pontual') +
     '<tr class="dre-row-header"><td colspan="'+(months.length+1)+'">DESPESAS OPERACIONAIS</td></tr>' +
     row('Ferramentas & SaaS','ferramentas') +
-    row('Salários & CLT','salarios') +
+    row('Salários & PJ','salarios') +
     row('Freelancers','freelancers') +
     row('Impostos & Taxas','impostos') +
     row('Infraestrutura','infraestrutura') +
@@ -624,16 +762,48 @@ function renderDRE(dre) {
 }
 
 function renderProjecao(proj) {
+  // Metas mensais de MRR (progressão linear Abr→Jul para R$100k)
+  const metasMensais = {
+    '2026-04': 40000, '2026-05': 60000, '2026-06': 80000, '2026-07': 100000,
+    '2026-08': 100000, '2026-09': 100000, '2026-10': 100000
+  };
+
+  let totalProjetado = 0;
+  let totalMeta = 0;
+
   document.getElementById('projecao-tbody').innerHTML = proj.map(p => {
-    const total = Number(p.total_projetado || 0) + Number(p.media_pontual_estimada || 0);
-    return `<tr><td>${p.label || p.periodo}</td><td>${R$(p.receita_recorrente_projetada)}</td>
-      <td>${R$(p.parcelas_projetadas)}</td><td style="color:var(--text-dim)">${R$(p.media_pontual_estimada)}</td>
-      <td><strong>${R$(total)}</strong></td></tr>`;
+    // Apenas valores concretos: recorrente + parcelas (sem estimativas)
+    const recorrente = Number(p.receita_recorrente_projetada || 0);
+    const parcelas = Number(p.parcelas_projetadas || 0);
+    const total = recorrente + parcelas;
+    const periodo = p.label || p.periodo;
+    const meta = metasMensais[p.periodo] || 100000;
+    const gap = total - meta;
+    totalProjetado += total;
+    totalMeta += meta;
+
+    return `<tr>
+      <td>${periodo}</td>
+      <td>${R$(recorrente)}</td>
+      <td>${R$(parcelas)}</td>
+      <td><strong>${R$(total)}</strong></td>
+      <td style="color:var(--yellow)">${R$(meta)}</td>
+      <td style="color:${gap >= 0 ? 'var(--primary)' : 'var(--red)'};font-weight:600">${gap >= 0 ? '+' : ''}${R$(gap)}</td>
+    </tr>`;
   }).join('');
+
+  // KPIs da projeção
+  const avgProj = proj.length > 0 ? totalProjetado / proj.length : 0;
+  const avgMeta = proj.length > 0 ? totalMeta / proj.length : 0;
+  document.getElementById('projecao-kpi-grid').innerHTML = [
+    { label: 'Média Projetada', value: R$(avgProj), color: 'green', sub: 'Valores concretos do Asaas' },
+    { label: 'Média Meta', value: R$(avgMeta), color: 'yellow', sub: 'Progressão até R$100k' },
+    { label: 'Gap Médio', value: R$(avgProj - avgMeta), color: avgProj >= avgMeta ? 'green' : 'red', sub: avgProj >= avgMeta ? 'Acima da meta' : 'Abaixo da meta' },
+  ].map(k => `<div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.color}">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
 }
 
 function renderCaixa(balances, r) {
-  const CUSTO_MENSAL = 23380; // Folha real: Lucas 4800 + Rogério 3580 + Maicon 3000 + Thiago 2000 + Pró-labore 10000
+  const CUSTO_MENSAL = 26980; // Pessoas PJ 13380 + Pró-labore 10000 + Ferramentas ~1600 + Marketing programado 2000
   const MESES_RESERVA = 6;
   const META_RESERVA = CUSTO_MENSAL * MESES_RESERVA;
 
@@ -706,15 +876,18 @@ function renderCharts(dre, proj) {
     ]}, options: { ...CHART_OPTS, scales: { ...CHART_OPTS.scales, x: { ...CHART_OPTS.scales.x, stacked: true }, y: { ...CHART_OPTS.scales.y, stacked: true } } }
   });
 
+  const metasMensais = {
+    '2026-04': 40000, '2026-05': 60000, '2026-06': 80000, '2026-07': 100000,
+    '2026-08': 100000, '2026-09': 100000, '2026-10': 100000
+  };
   const ctx3 = document.getElementById('chart-projecao');
   if (ctx3._chart) ctx3._chart.destroy();
   ctx3._chart = new Chart(ctx3, {
     type: 'bar',
     data: { labels: proj.map(p => p.label || p.periodo), datasets: [
-      { label: 'Recorrente', data: proj.map(p => p.receita_recorrente_projetada), backgroundColor: '#2d9d6e', borderRadius: 4 },
-      { label: 'Parcelas', data: proj.map(p => p.parcelas_projetadas), backgroundColor: '#3b82f6', borderRadius: 4 },
-      { label: 'Pontual Est.', data: proj.map(p => p.media_pontual_estimada), backgroundColor: 'rgba(139,92,246,0.5)', borderRadius: 4 },
-    ]}, options: { ...CHART_OPTS, scales: { ...CHART_OPTS.scales, x: { ...CHART_OPTS.scales.x, stacked: true }, y: { ...CHART_OPTS.scales.y, stacked: true } } }
+      { label: 'Projetado (concreto)', data: proj.map(p => Number(p.receita_recorrente_projetada||0) + Number(p.parcelas_projetadas||0)), backgroundColor: '#2d9d6e', borderRadius: 4 },
+      { label: 'Meta do Mês', data: proj.map(p => metasMensais[p.periodo] || 100000), backgroundColor: 'rgba(234,179,8,0.3)', borderColor: '#eab308', borderWidth: 2, borderRadius: 4, type: 'bar' },
+    ]}, options: CHART_OPTS
   });
 }
 
@@ -723,10 +896,10 @@ function renderDespesasFixas(allExpenses, transfers) {
   // Equipe fixa com valores reais
   const pessoas = [
     { nome: 'Moisés', cargo: 'Sócio / CEO', valor: 10000, tipo: 'Pró-labore' },
-    { nome: 'Lucas Teles', cargo: 'Dir. Operações (Ag. Pitz)', valor: 4800, tipo: 'CLT' },
-    { nome: 'Rogério', cargo: 'Designer', valor: 3580, tipo: 'CLT' },
-    { nome: 'Maicon', cargo: 'Equipe', valor: 3000, tipo: 'CLT' },
-    { nome: 'Thiago Soares', cargo: 'Equipe', valor: 2000, tipo: 'CLT' },
+    { nome: 'Lucas Teles', cargo: 'Dir. Operações (Ag. Pitz)', valor: 4800, tipo: 'PJ' },
+    { nome: 'Rogério', cargo: 'Designer', valor: 3580, tipo: 'PJ' },
+    { nome: 'Maicon', cargo: 'Gestor de Tráfego', valor: 3000, tipo: 'PJ' },
+    { nome: 'Thiago Soares', cargo: 'Marketing Interno', valor: 2000, tipo: 'PJ' },
   ];
 
   const totalPessoas = pessoas.reduce((s,p) => s + p.valor, 0);
@@ -738,7 +911,13 @@ function renderDespesasFixas(allExpenses, transfers) {
   // Recorrentes - puxar do banco (despesas com source='inter_csv' que se repetem)
   const recorrentes = [];
   const recMap = {};
-  allExpenses.filter(e => e.expense_categories?.name !== 'Salários & CLT' && e.expense_categories?.name !== 'Pro-labore').forEach(e => {
+  const excludedCats = ['Alimentação & Transporte', 'Cartão IOF', 'Outros', 'Marketing & Ads'];
+  allExpenses.filter(e => {
+    const cat = e.expense_categories?.name || 'Outros';
+    const isRecurringCategory = cat === 'Ferramentas & SaaS' || cat === 'Infraestrutura';
+    const isNotExcluded = !excludedCats.includes(cat);
+    return isRecurringCategory && isNotExcluded && e.is_recurring !== false;
+  }).forEach(e => {
     const key = e.description;
     if (!recMap[key]) recMap[key] = { desc: e.description, cat: e.expense_categories?.name || 'Outros', valor: Number(e.amount), count: 0 };
     recMap[key].count++;
@@ -754,11 +933,16 @@ function renderDespesasFixas(allExpenses, transfers) {
     ).join('') + `<tr style="border-top:2px solid var(--border)"><td colspan="2"><strong>Total Recorrente/mês</strong></td><td><strong>${R$(totalRecorrentes)}</strong></td><td></td></tr>`
     : '<tr><td colspan="4" style="color:var(--text-dim)">Importe o CSV do Inter para ver despesas recorrentes</td></tr>');
 
+  // Marketing programado (investimento fixo mensal em tráfego pago)
+  const marketingProgramado = 2000;
+  const custoFixoTotal = totalPessoas + totalRecorrentes + marketingProgramado;
+
   // KPIs
   document.getElementById('despesas-kpi-grid').innerHTML = [
     { label: 'Folha + Pró-labore', value: R$(totalPessoas), color: 'orange', sub: pessoas.length + ' pessoas' },
     { label: 'Ferramentas Recorrentes', value: R$(totalRecorrentes), color: 'blue', sub: recorrentes.length > 0 ? recorrentes.length + ' itens' : 'Importe CSV do Inter' },
-    { label: 'Custo Fixo Mensal', value: R$(totalPessoas + totalRecorrentes), color: 'red', sub: 'Pessoas + ferramentas' },
+    { label: 'Marketing Programado', value: R$(marketingProgramado), color: 'purple', sub: 'Investimento mensal em tráfego' },
+    { label: 'Custo Fixo Mensal', value: R$(custoFixoTotal), color: 'red', sub: 'Pessoas + ferramentas + marketing' },
   ].map(k => `<div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.color}">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
 
   // All expenses list (from database - populated after CSV import)
