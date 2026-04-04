@@ -637,18 +637,19 @@ function renderCaixa(balances, r) {
   const MESES_RESERVA = 6;
   const META_RESERVA = CUSTO_MENSAL * MESES_RESERVA;
 
-  const accs = [{name:'Asaas',bal:0},{name:'Inter PJ',bal:0},{name:'Mercado Pago',bal:0},{name:'Total',bal:0}];
+  const accs = [{name:'Asaas',bal:0},{name:'Inter PJ',bal:0},{name:'Mercado Pago',bal:0},{name:'CDB / Reserva',bal:0},{name:'Total',bal:0}];
   balances.forEach(b => {
     if (b.account==='asaas') accs[0].bal = b.balance;
     if (b.account==='inter') accs[1].bal = b.balance;
     if (b.account==='mercado_pago') accs[2].bal = b.balance;
+    if (b.account==='cdb_reserva') accs[3].bal = b.balance;
   });
-  accs[3].bal = accs[0].bal + accs[1].bal + accs[2].bal;
+  accs[4].bal = accs[0].bal + accs[1].bal + accs[2].bal + accs[3].bal;
   document.getElementById('caixa-grid').innerHTML = accs.map(a => `
-    <div class="caixa-card"><div class="account-name">${a.name}</div><div class="account-balance">${R$(a.bal)}</div></div>`).join('');
+    <div class="caixa-card"><div class="account-name">${a.name}</div><div class="account-balance" style="${a.name==='CDB / Reserva'?'color:var(--blue)':''}">${R$(a.bal)}</div></div>`).join('');
 
-  // Reserva de Emergência
-  const caixaTotal = accs[3].bal;
+  // Reserva de Emergência (CDB + Caixa livre = tudo disponível)
+  const caixaTotal = accs[4].bal;
   const pctReserva = Math.min((caixaTotal / META_RESERVA) * 100, 100);
   document.getElementById('reserva-section').style.display = 'block';
   document.getElementById('reserva-pct').textContent = pctReserva.toFixed(1) + '%';
@@ -825,6 +826,10 @@ function processCSV() {
       // Use Descrição if available, otherwise Histórico
       const desc = (descIdx >= 0 && cols[descIdx]) ? cols[descIdx] : (histIdx >= 0 ? cols[histIdx] : 'Despesa Inter');
       const hist = histIdx >= 0 ? cols[histIdx].toLowerCase() : '';
+      const fullText = (desc + ' ' + hist).toLowerCase();
+
+      // Skip CDB/investment entries — these are emergency reserve, not expenses
+      if (fullText.includes('cdb') || fullText.includes('aplicação') || fullText.includes('aplicacao') || fullText.includes('resgate')) continue;
 
       // Parse date (DD/MM/YYYY or YYYY-MM-DD)
       let dateStr = cols[dateIdx];
@@ -835,7 +840,7 @@ function processCSV() {
 
       // Auto-categorize using description + histórico
       let cat = 'Outros';
-      const dl = (desc + ' ' + hist).toLowerCase();
+      const dl = fullText;
       if (dl.includes('prolabore') || dl.includes('pró-labore')) cat = 'Pro-labore';
       else if (dl.includes('salario') || dl.includes('salário') || dl.includes('folha')) cat = 'Salários & CLT';
       else if (dl.includes('imposto') || dl.includes('das ') || dl.includes('iss ') || dl.includes('irpj') || dl.includes('tribut')) cat = 'Impostos & Taxas';
