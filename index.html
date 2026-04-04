@@ -533,19 +533,20 @@ function renderKPIs(r, dreMonth) {
   // TODOS os valores vêm do DRE — mesma fonte, mesmos números
   const periodo = dreMonth ? dreMonth.periodo : '—';
   const receitaLiq = dreMonth ? Number(dreMonth.receita_liquida || 0) : 0;
-  const despOp = dreMonth ? Number(dreMonth.despesas_operacionais || 0) : 0;
+  const pessoasPj = dreMonth ? Number(dreMonth.pessoas_pj || 0) : 0;
   const prolabore = dreMonth ? Number(dreMonth.prolabore || 0) : 0;
-  const salarios = dreMonth ? Number(dreMonth.salarios || 0) : 0;
-  const lucroOp = dreMonth ? Number(dreMonth.lucro_operacional || 0) : 0;
+  const despOp = dreMonth ? Number(dreMonth.despesas_operacionais || 0) : 0;
+  const custoTotal = dreMonth ? Number(dreMonth.custo_total || 0) : 0;
   const lucroLiq = dreMonth ? Number(dreMonth.lucro_liquido || 0) : 0;
   const margemLiq = dreMonth ? Number(dreMonth.margem_liquida_pct || 0) : 0;
 
   const kpis = [
     { label: 'MRR Atual', value: R$(r.mrr_atual), color: 'green', sub: r.total_assinaturas_ativas + ' assinaturas ativas' },
     { label: 'Receita Líquida', value: R$(receitaLiq), color: 'green', sub: periodo },
-    { label: 'Desp. Operacionais', value: R$(despOp), color: 'red', sub: 'Inclui salários & PJ' },
+    { label: 'Equipe PJ', value: R$(pessoasPj), color: 'orange', sub: 'Contratos PJ' },
     { label: 'Pró-labore', value: R$(prolabore), color: 'orange', sub: 'Sócio' },
-    { label: 'Lucro Líquido', value: R$(lucroLiq), color: lucroLiq >= 0 ? 'green' : 'red', sub: 'Receita − despesas − pró-labore' },
+    { label: 'Desp. Operacionais', value: R$(despOp), color: 'red', sub: 'Ferramentas, impostos, outros' },
+    { label: 'Lucro Líquido', value: R$(lucroLiq), color: lucroLiq >= 0 ? 'green' : 'red', sub: 'Receita − tudo' },
     { label: 'Margem Líquida', value: margemLiq + '%', color: margemLiq >= 0 ? 'green' : 'red', sub: 'Lucro / Receita' },
     { label: 'Inadimplência', value: R$(r.total_inadimplente), color: r.total_inadimplente > 0 ? 'red' : 'green', sub: r.clientes_inadimplentes + ' clientes em atraso' },
     { label: 'Caixa Total', value: R$(r.caixa_total), color: 'blue', sub: 'Asaas + Inter + Mercado Pago' },
@@ -737,20 +738,20 @@ function renderDRE(dre) {
     row('= Receita Líquida','receita_liquida',true,'var(--primary)') +
     row('  Recorrente','receita_recorrente') +
     row('  Pontual','receita_pontual') +
+    '<tr class="dre-row-header"><td colspan="'+(months.length+1)+'">PESSOAS</td></tr>' +
+    row('Equipe PJ','pessoas_pj',false,'var(--orange)') +
+    row('Pró-labore','prolabore',false,'var(--orange)') +
     '<tr class="dre-row-header"><td colspan="'+(months.length+1)+'">DESPESAS OPERACIONAIS</td></tr>' +
     row('Ferramentas & SaaS','ferramentas') +
-    row('Salários & PJ','salarios') +
     row('Freelancers','freelancers') +
     row('Impostos & Taxas','impostos') +
     row('Infraestrutura','infraestrutura') +
-    row('Marketing','marketing_proprio') +
+    row('Marketing & Ads','marketing_proprio') +
     row('Outros','outros') +
-    row('= Total Despesas','despesas_operacionais',true,'var(--red)') +
+    row('= Total Desp. Operacionais','despesas_operacionais',true,'var(--red)') +
     '<tr class="dre-row-header"><td colspan="'+(months.length+1)+'">RESULTADO</td></tr>' +
-    row('Lucro Operacional','lucro_operacional',true,'var(--primary)') +
-    row('(-) Pró-labore','prolabore',false,'var(--orange)') +
+    row('= Custo Total','custo_total',true,'var(--red)') +
     row('= Lucro Líquido','lucro_liquido',true) +
-    row('Margem Operacional','margem_operacional_pct') +
     row('Margem Líquida','margem_liquida_pct') +
     '</tbody>';
 }
@@ -791,7 +792,8 @@ function renderProjecao(proj, subs) {
 }
 
 function renderCaixa(balances, r) {
-  const CUSTO_MENSAL = 26980; // Pessoas PJ 13380 + Pró-labore 10000 + Ferramentas ~1600 + Marketing programado 2000
+  // Abr+: PJ 15680 + Pró-labore 10000 + Ferramentas ~1800 + Marketing 2000 = ~29.480
+  const CUSTO_MENSAL = 29480;
   const MESES_RESERVA = 6;
   const META_RESERVA = CUSTO_MENSAL * MESES_RESERVA;
 
@@ -850,7 +852,7 @@ function renderCharts(dre, proj) {
     type: 'bar',
     data: { labels: months.map(m => m.periodo), datasets: [
       { label: 'Receita Líquida', data: months.map(m => m.receita_liquida), backgroundColor: '#2d9d6e', borderRadius: 4 },
-      { label: 'Custos Totais', data: months.map(m => Number(m.despesas_operacionais) + Number(m.prolabore)), backgroundColor: '#ef4444', borderRadius: 4 },
+      { label: 'Custos Totais', data: months.map(m => Number(m.custo_total || 0)), backgroundColor: '#ef4444', borderRadius: 4 },
     ]}, options: CHART_OPTS
   });
 
@@ -886,14 +888,20 @@ function renderCharts(dre, proj) {
 
 // ===== DESPESAS FIXAS =====
 function renderDespesasFixas(allExpenses, transfers) {
-  // Equipe fixa com valores reais
+  // Equipe fixa — muda conforme o período
+  const selectedMonth = document.getElementById('despesas-mes')?.value || new Date().toISOString().slice(0, 7);
+  const isAbrilPlus = selectedMonth >= '2026-04';
+
   const pessoas = [
     { nome: 'Moisés', cargo: 'Sócio / CEO', valor: 10000, tipo: 'Pró-labore' },
     { nome: 'Lucas Teles', cargo: 'Dir. Operações (Ag. Pitz)', valor: 4800, tipo: 'PJ' },
-    { nome: 'Rogério', cargo: 'Designer', valor: 3580, tipo: 'PJ' },
-    { nome: 'Maicon', cargo: 'Gestor de Tráfego', valor: 3000, tipo: 'PJ' },
-    { nome: 'Thiago Soares', cargo: 'Marketing Interno', valor: 2000, tipo: 'PJ' },
+    { nome: 'Rogério Bahia', cargo: 'Designer Gráfico', valor: 3580, tipo: 'PJ' },
+    { nome: 'Letícia Macedo', cargo: 'Customer Success', valor: 2300, tipo: 'PJ' },
   ];
+  if (isAbrilPlus) {
+    pessoas.push({ nome: 'Maicon', cargo: 'Gestor de Tráfego', valor: 3000, tipo: 'PJ' });
+    pessoas.push({ nome: 'Thiago Soares', cargo: 'Marketing Interno', valor: 2000, tipo: 'PJ' });
+  }
 
   const totalPessoas = pessoas.reduce((s,p) => s + p.valor, 0);
   document.getElementById('pessoas-tbody').innerHTML = pessoas.map(p =>
