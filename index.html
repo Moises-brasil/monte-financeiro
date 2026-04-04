@@ -232,11 +232,12 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       <div id="main-content" style="display:none;">
         <div class="meta-section">
           <div class="meta-header">
-            <h3>Meta MRR R$ 100.000</h3>
+            <h3>Meta MRR → R$ 100.000 até Jul/2026</h3>
             <span id="meta-pct">0%</span>
           </div>
           <div class="meta-bar-bg"><div class="meta-bar-fill" id="meta-bar" style="width:0%"></div></div>
           <div class="meta-labels"><span>R$ 0</span><span id="meta-mrr-label">MRR: R$ 0</span><span>R$ 100.000</span></div>
+          <div id="meta-status" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
           <label style="color:var(--text-muted);font-size:13px;">Período:</label>
@@ -307,7 +308,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         <div class="table-header"><h3>Detalhamento — Valores Concretos (Assinaturas Ativas + Parcelas Programadas)</h3></div>
         <div style="overflow-x:auto;">
           <table>
-            <thead><tr><th>Período</th><th>Recorrente</th><th>Parcelas</th><th>Total Projetado</th><th>Meta do Mês</th><th>Gap</th></tr></thead>
+            <thead><tr><th>Período</th><th>MRR (Assinaturas Ativas)</th><th>Meta do Mês</th><th>Gap</th></tr></thead>
             <tbody id="projecao-tbody"></tbody>
           </table>
         </div>
@@ -503,12 +504,14 @@ async function loadAll() {
     allExpenses = resAllExp.data || []; // Store for despesas filter
     const transfers = resTrans.data || [];
 
-    renderKPIs(resumo);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const currentDRE = dre.find(m => m.periodo === currentMonth);
+    renderKPIs(resumo, currentDRE || null);
     renderMeta(resumo);
     renderClientes(allClientes);
     renderSubs(subs);
     renderDRE(dre);
-    renderProjecao(proj);
+    renderProjecao(proj, subs);
     renderAlertas(alertas, subs);
     renderCaixa(balances, resumo);
     renderDespesasCat(expenses);
@@ -529,16 +532,31 @@ async function loadAll() {
 function renderKPIs(r, dreMonth) {
   // Custo fixo total real: PJ R$13.380 + pró-labore R$10.000 + ferramentas ~R$1.600 + marketing R$2.000
   const CUSTO_FIXO_TOTAL = 26980;
-  const receitaMes = Number(r.receita_recebida_mes || 0);
-  const lucroLiqReal = receitaMes - CUSTO_FIXO_TOTAL;
-  const margemLiqReal = receitaMes > 0 ? ((lucroLiqReal / receitaMes) * 100).toFixed(1) : '0.0';
+  const PJ_TOTAL = 13380;
+  const PROLABORE = 10000;
+
+  // Se tem DRE do mês selecionado, usar esses valores; senão usar resumo (mês atual)
+  let receitaBruta, receitaLiq, despOp, lucroLiqReal;
+  if (dreMonth) {
+    receitaBruta = Number(dreMonth.receita_bruta || 0);
+    receitaLiq = Number(dreMonth.receita_liquida || 0);
+    despOp = Number(dreMonth.despesas_operacionais || 0);
+    // Lucro real = receita líquida - despesas operacionais - PJ - pró-labore
+    lucroLiqReal = receitaLiq - despOp - PJ_TOTAL - PROLABORE;
+  } else {
+    receitaBruta = Number(r.receita_recebida_mes || 0);
+    receitaLiq = receitaBruta;
+    despOp = Number(r.despesas_mes || 0);
+    lucroLiqReal = receitaLiq - CUSTO_FIXO_TOTAL;
+  }
+  const margemLiqReal = receitaLiq > 0 ? ((lucroLiqReal / receitaLiq) * 100).toFixed(1) : '0.0';
 
   const kpis = [
     { label: 'MRR Atual', value: R$(r.mrr_atual), color: 'green', sub: r.total_assinaturas_ativas + ' assinaturas ativas' },
-    { label: 'Recebido no Mês', value: R$(receitaMes), color: 'green', sub: 'Receita líquida confirmada' },
-    { label: 'Pendente no Mês', value: R$(r.receita_pendente_mes), color: 'orange', sub: 'Aguardando pagamento' },
-    { label: 'Custo Fixo Mensal', value: R$(CUSTO_FIXO_TOTAL), color: 'red', sub: 'Pessoas + ferramentas + marketing' },
-    { label: 'Lucro Líquido', value: R$(lucroLiqReal), color: lucroLiqReal >= 0 ? 'green' : 'red', sub: 'Receita − todos custos fixos' },
+    { label: 'Receita Líquida', value: R$(receitaLiq), color: 'green', sub: dreMonth ? dreMonth.periodo : 'Mês atual' },
+    { label: 'Despesas Operacionais', value: R$(despOp), color: 'red', sub: 'Ferramentas, impostos, outros' },
+    { label: 'Pessoas (PJ + Pró-labore)', value: R$(PJ_TOTAL + PROLABORE), color: 'orange', sub: 'R$13.380 PJ + R$10.000 pró-labore' },
+    { label: 'Lucro Líquido', value: R$(lucroLiqReal), color: lucroLiqReal >= 0 ? 'green' : 'red', sub: 'Receita − todos custos' },
     { label: 'Margem Líquida', value: margemLiqReal + '%', color: lucroLiqReal >= 0 ? 'green' : 'red', sub: 'Lucro / Receita' },
     { label: 'Inadimplência', value: R$(r.total_inadimplente), color: r.total_inadimplente > 0 ? 'red' : 'green', sub: r.clientes_inadimplentes + ' clientes em atraso' },
     { label: 'Caixa Total', value: R$(r.caixa_total), color: 'blue', sub: 'Asaas + Inter + Mercado Pago' },
@@ -568,7 +586,6 @@ function renderMeta(r) {
 
   // Renderizar marcador da meta do mês na barra
   const barBg = document.querySelector('.meta-bar-bg');
-  // Remover marcadores anteriores
   barBg.querySelectorAll('.meta-target-marker, .meta-target-label').forEach(el => el.remove());
   if (metaMes < META_FINAL) {
     const marker = document.createElement('div');
@@ -578,8 +595,17 @@ function renderMeta(r) {
     const label = document.createElement('div');
     label.className = 'meta-target-label';
     label.style.left = pctMeta + '%';
-    label.textContent = 'Meta ' + mesAtual.slice(5) + '/' + mesAtual.slice(2,4) + ': ' + R$(metaMes);
+    label.textContent = R$(metaMes);
     barBg.appendChild(label);
+  }
+
+  // Status textual claro
+  const gapMeta = mrr - metaMes;
+  const statusEl = document.getElementById('meta-status');
+  if (gapMeta >= 0) {
+    statusEl.innerHTML = '<span style="color:var(--primary);font-weight:600;">MRR ' + R$(mrr) + ' — acima da meta de ' + R$(metaMes) + ' para este mês (+' + R$(gapMeta) + ')</span>';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--orange);font-weight:600;">MRR ' + R$(mrr) + ' — faltam ' + R$(Math.abs(gapMeta)) + ' para a meta de ' + R$(metaMes) + ' deste mês</span>';
   }
 }
 
@@ -602,9 +628,7 @@ function populateVisaoMesSelector() {
 function updateVisaoMes() {
   const selected = document.getElementById('visao-mes').value;
   const dreMonth = allDRE.find(m => m.periodo === selected);
-  if (dreMonth) {
-    renderKPIs(resumo, dreMonth);
-  }
+  renderKPIs(resumo, dreMonth || null);
 }
 
 function populateDespesasMesSelector() {
@@ -761,44 +785,44 @@ function renderDRE(dre) {
     '</tbody>';
 }
 
-function renderProjecao(proj) {
-  // Metas mensais de MRR (progressão linear Abr→Jul para R$100k)
+function renderProjecao(proj, subs) {
+  // MRR real = soma das assinaturas ATIVAS (valor concreto)
+  const mrrReal = (subs || []).filter(s => s.status === 'ACTIVE').reduce((sum, s) => sum + Number(s.value || 0), 0);
+
+  // Metas mensais (progressão linear Abr→Jul para R$100k)
   const metasMensais = {
     '2026-04': 40000, '2026-05': 60000, '2026-06': 80000, '2026-07': 100000,
     '2026-08': 100000, '2026-09': 100000, '2026-10': 100000
   };
 
-  let totalProjetado = 0;
-  let totalMeta = 0;
+  // Gerar meses a partir do mês atual (incluindo ele)
+  const hoje = new Date();
+  const meses = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    const periodo = d.toISOString().slice(0, 7);
+    const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+    meses.push({ periodo, label });
+  }
 
-  document.getElementById('projecao-tbody').innerHTML = proj.map(p => {
-    // Apenas valores concretos: recorrente + parcelas (sem estimativas)
-    const recorrente = Number(p.receita_recorrente_projetada || 0);
-    const parcelas = Number(p.parcelas_projetadas || 0);
-    const total = recorrente + parcelas;
-    const periodo = p.label || p.periodo;
-    const meta = metasMensais[p.periodo] || 100000;
-    const gap = total - meta;
-    totalProjetado += total;
-    totalMeta += meta;
-
+  document.getElementById('projecao-tbody').innerHTML = meses.map(m => {
+    const meta = metasMensais[m.periodo] || 100000;
+    const gap = mrrReal - meta;
     return `<tr>
-      <td>${periodo}</td>
-      <td>${R$(recorrente)}</td>
-      <td>${R$(parcelas)}</td>
-      <td><strong>${R$(total)}</strong></td>
+      <td>${m.label}</td>
+      <td><strong>${R$(mrrReal)}</strong></td>
       <td style="color:var(--yellow)">${R$(meta)}</td>
       <td style="color:${gap >= 0 ? 'var(--primary)' : 'var(--red)'};font-weight:600">${gap >= 0 ? '+' : ''}${R$(gap)}</td>
     </tr>`;
   }).join('');
 
-  // KPIs da projeção
-  const avgProj = proj.length > 0 ? totalProjetado / proj.length : 0;
-  const avgMeta = proj.length > 0 ? totalMeta / proj.length : 0;
+  // KPIs
+  const metaAtual = metasMensais[meses[0]?.periodo] || 100000;
+  const gapAtual = mrrReal - metaAtual;
   document.getElementById('projecao-kpi-grid').innerHTML = [
-    { label: 'Média Projetada', value: R$(avgProj), color: 'green', sub: 'Valores concretos do Asaas' },
-    { label: 'Média Meta', value: R$(avgMeta), color: 'yellow', sub: 'Progressão até R$100k' },
-    { label: 'Gap Médio', value: R$(avgProj - avgMeta), color: avgProj >= avgMeta ? 'green' : 'red', sub: avgProj >= avgMeta ? 'Acima da meta' : 'Abaixo da meta' },
+    { label: 'MRR Atual (Assinaturas Ativas)', value: R$(mrrReal), color: 'green', sub: (subs || []).filter(s => s.status === 'ACTIVE').length + ' assinaturas' },
+    { label: 'Meta deste Mês', value: R$(metaAtual), color: 'yellow', sub: 'Progressão até R$100k' },
+    { label: 'Gap', value: R$(gapAtual), color: gapAtual >= 0 ? 'green' : 'red', sub: gapAtual >= 0 ? 'Acima da meta' : 'Faltam ' + R$(Math.abs(gapAtual)) },
   ].map(k => `<div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value ${k.color}">${k.value}</div><div class="kpi-sub">${k.sub}</div></div>`).join('');
 }
 
@@ -858,11 +882,16 @@ function renderCharts(dre, proj) {
   const months = dre.slice(0, 6).reverse();
   const ctx1 = document.getElementById('chart-receita-despesa');
   if (ctx1._chart) ctx1._chart.destroy();
+  const PJ_MENSAL = 13380;
+  const PROLABORE_MENSAL = 10000;
   ctx1._chart = new Chart(ctx1, {
     type: 'bar',
     data: { labels: months.map(m => m.periodo), datasets: [
       { label: 'Receita Líquida', data: months.map(m => m.receita_liquida), backgroundColor: '#2d9d6e', borderRadius: 4 },
-      { label: 'Despesas + Pró-labore', data: months.map(m => Number(m.despesas_operacionais)+Number(m.prolabore)), backgroundColor: '#ef4444', borderRadius: 4 },
+      { label: 'Custos Totais', data: months.map(m => {
+        const hasActivity = Number(m.receita_bruta) > 0 || Number(m.despesas_operacionais) > 0;
+        return hasActivity ? Number(m.despesas_operacionais) + PJ_MENSAL + PROLABORE_MENSAL : 0;
+      }), backgroundColor: '#ef4444', borderRadius: 4 },
     ]}, options: CHART_OPTS
   });
 
@@ -876,17 +905,27 @@ function renderCharts(dre, proj) {
     ]}, options: { ...CHART_OPTS, scales: { ...CHART_OPTS.scales, x: { ...CHART_OPTS.scales.x, stacked: true }, y: { ...CHART_OPTS.scales.y, stacked: true } } }
   });
 
-  const metasMensais = {
+  // Gráfico de projeção: MRR real vs Meta
+  const mrrReal = Number(resumo.mrr_atual || 0);
+  const metasMensaisChart = {
     '2026-04': 40000, '2026-05': 60000, '2026-06': 80000, '2026-07': 100000,
     '2026-08': 100000, '2026-09': 100000, '2026-10': 100000
   };
+  const hoje = new Date();
+  const mesesProj = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth() + i, 1);
+    const periodo = d.toISOString().slice(0, 7);
+    const label = d.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+    mesesProj.push({ periodo, label });
+  }
   const ctx3 = document.getElementById('chart-projecao');
   if (ctx3._chart) ctx3._chart.destroy();
   ctx3._chart = new Chart(ctx3, {
     type: 'bar',
-    data: { labels: proj.map(p => p.label || p.periodo), datasets: [
-      { label: 'Projetado (concreto)', data: proj.map(p => Number(p.receita_recorrente_projetada||0) + Number(p.parcelas_projetadas||0)), backgroundColor: '#2d9d6e', borderRadius: 4 },
-      { label: 'Meta do Mês', data: proj.map(p => metasMensais[p.periodo] || 100000), backgroundColor: 'rgba(234,179,8,0.3)', borderColor: '#eab308', borderWidth: 2, borderRadius: 4, type: 'bar' },
+    data: { labels: mesesProj.map(m => m.label), datasets: [
+      { label: 'MRR Atual', data: mesesProj.map(() => mrrReal), backgroundColor: '#2d9d6e', borderRadius: 4 },
+      { label: 'Meta do Mês', data: mesesProj.map(m => metasMensaisChart[m.periodo] || 100000), backgroundColor: 'rgba(234,179,8,0.3)', borderColor: '#eab308', borderWidth: 2, borderRadius: 4 },
     ]}, options: CHART_OPTS
   });
 }
